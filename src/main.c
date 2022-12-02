@@ -11,6 +11,8 @@
 #include "esp_log.h"
 
 
+#include "PidCalc.h"
+
 #define SENS_NUM 11
 
 
@@ -69,6 +71,7 @@ static const adc_bits_width_t width = ADC_WIDTH_BIT_9;
 
 uint16_t readAnalog(uint8_t sensorNumber)
 {
+
     int reading = 0;
     switch (sensorNumber)
     {
@@ -76,7 +79,7 @@ uint16_t readAnalog(uint8_t sensorNumber)
         reading = adc1_get_raw(ADC1_CHANNEL_3);
         break;
     case 1:
-        reading = adc1_get_raw(ADC1_CHANNEL_1);
+        reading = adc1_get_raw(ADC1_CHANNEL_0);
         break;
     case 2:
         reading = adc1_get_raw(ADC1_CHANNEL_6);
@@ -95,6 +98,7 @@ uint16_t readAnalog(uint8_t sensorNumber)
         break;
     case 7:
         adc2_get_raw(ADC2_CHANNEL_6, width, &reading);
+
         break;
     case 8:
         adc2_get_raw(ADC2_CHANNEL_7, width, &reading);
@@ -117,33 +121,63 @@ void taskGetSensorInput(Sensor *sensArr)
     for(uint8_t i = 0; i < SENS_NUM; i++)
     {
         (sensArr + i) -> analogValue = readAnalog(i);
-
+        if((sensArr + i) -> analogValue > (sensArr + i) -> middlePoint)
+            (sensArr + i) -> digitalRead = 1;
+        else
+            (sensArr + i) -> digitalRead = 0;
     }
 
     
 }
 
+int32_t calculateSensorReading(Sensor *sensArr)
+{
+    int32_t result = 0;
+    uint8_t numOfTrueSensor = 0;
+    for(uint8_t i = 0; i < SENS_NUM; i++)
+    {
+        if((sensArr + i) -> digitalRead)
+        {
+            result += i * 1000;
+            numOfTrueSensor++;
+        }
+    }
+    return result / numOfTrueSensor;
+}
+
 
 void app_main()
 {
+    Pid pid1;
+    Pid *pid1_ptr = &pid1;
+    pid1.kp=1;
+    pid1.ki=0.001;
+    pid1.kd=1;
+
+    pid1.lastError = 0;
+    pid1.intergral = 0;
     Sensor sensorArray[SENS_NUM];
+
+    for(u_int8_t i = 0; i < SENS_NUM; i++)
+        sensorArray[i].middlePoint = 200;
+
     gpio_pad_select_gpio (GPIO_NUM_12);
     gpio_set_direction(GPIO_NUM_12, GPIO_MODE_OUTPUT);
 
-    
     adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_DB_11);
-    adc1_config_channel_atten(ADC1_CHANNEL_1, ADC_ATTEN_DB_6);
+    adc1_config_channel_atten(ADC1_CHANNEL_1, ADC_ATTEN_DB_11);
     adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
-    adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_2_5);
+    adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_11);
     adc1_config_channel_atten(ADC1_CHANNEL_4, ADC_ATTEN_DB_11);
     adc2_config_channel_atten(ADC2_CHANNEL_4, ADC_ATTEN_DB_11);
     adc1_config_channel_atten(ADC1_CHANNEL_5, ADC_ATTEN_DB_11);
     adc2_config_channel_atten(ADC2_CHANNEL_6, ADC_ATTEN_DB_11);
     adc2_config_channel_atten(ADC2_CHANNEL_7, ADC_ATTEN_DB_11);
-    adc2_config_channel_atten(ADC2_CHANNEL_8, ADC_ATTEN_DB_6);
-    adc2_config_channel_atten(ADC2_CHANNEL_9, ADC_ATTEN_DB_6);
+    adc2_config_channel_atten(ADC2_CHANNEL_8, ADC_ATTEN_DB_11);
+    adc2_config_channel_atten(ADC2_CHANNEL_9, ADC_ATTEN_DB_11);
     
 
+   
 
     adc1_config_width(width);
 
@@ -151,11 +185,19 @@ void app_main()
     {
 
         taskGetSensorInput(sensorArray);
+        int32_t sensReading = calculateSensorReading(sensorArray);
+        int32_t pidRes = calculatePid(pid1_ptr, sensReading - 5000, 1);
+        
         for(uint8_t i = 0; i < SENS_NUM; i++)
         {
-            printf("%i, ", sensorArray[i].analogValue);    
+            printf("%i, ", sensorArray[i].digitalRead);    
         }
+        printf("   %i, ", sensReading - 5000);    
+
+        printf("   %i, ", pidRes);    
+
         printf("\n");
+        vTaskDelay(10);
     }
     
 
